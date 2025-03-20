@@ -1,39 +1,44 @@
 ---
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: 2025 The Linux Foundation
+# SPDX-FileCopyrightText: 2024 The Linux Foundation
 
-# actions-template
-name: "🛠️ Actions Template"
-description: "Description of action"
-# Any relevant notes/observations can go here
+# python-dynamic-version-action
+name: "🐍 Check Python Project for Dynamic Versioning"
+description: "Checks if dynamic versioning is enabled in pyproject.toml"
 
 inputs:
-  INPUT:
-    description: "Description of input"
-    required: false
+  # Optional
+  PATH_PREFIX:
+    description: "Directory location containing project code"
     type: string
-    default: "input"
-
+    required: false
+    default: ""
 outputs:
-  OUTPUT:
-    description: "Description of output"
-    value: ${{ steps.code.outputs.output }}
+  DYNAMIC_VERSION:
+    description: "Set true when dynamic versioning configured"
+    value: ${{ steps.parse.outputs.dynamic_version }}
 
 runs:
   using: "composite"
   steps:
-    - name: "Friendly Name"
-      id: code
+    - name: "Check for required pyproject.toml file"
+      # yamllint disable-line rule:line-length
+      uses: lfit/releng-reusable-workflows/.github/actions/path-check-action@9b845102d5158f0b80bd53405a0b6855b26dc4a0 # v0.2.9
+      with:
+        path: "${{ inputs.path_prefix }}pyproject.toml"
+
+    - id: parse
+      name: "Check for dynamic project versioning"
       shell: bash
       run: |
-        # Friendly Name
-        INPUT="${{ inputs.input }}"
-        if [ -z "$INPUT" ]; then
-          echo "Error: mandatory input INPUT was not set/configured ❌"
-          exit 1
+        # Check for dynamic project versioning
+        if (grep -q 'dynamic = \["version"\]' \
+          ${{ inputs.path_prefix }}pyproject.toml); then
+          echo "Dynamic versioning configured ✅"
+          echo "dynamic_version=true" >> "$GITHUB_ENV"
+          echo "dynamic_version=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "Dynamic versioning NOT configured"
+          echo "dynamic_version=false" >> "$GITHUB_ENV"
+          echo "dynamic_version=false" >> "$GITHUB_OUTPUT"
         fi
-
-        echo "output=$INPUT" >> "$GITHUB_ENV"
-        echo "output=$INPUT" >> "$GITHUB_OUTPUT"
-        echo "Action received a valid input: $INPUT ✅"
-        echo "Action received a valid input: $INPUT ✅" >> "$GITHUB_STEP_SUMMARY"
