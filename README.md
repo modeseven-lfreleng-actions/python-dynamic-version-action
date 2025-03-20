@@ -16,6 +16,14 @@ Parses pyproject.toml to check if dynamic versioning enabled.
   uses: lfit/releng-reusable-workflows/.github/actions/python-dynamic-version-action@main
 ```
 
+##  Inputs
+
+<!-- markdownlint-disable MD013 -->
+
+| Variable Name       | Required | Description                           |
+| ------------------- | -------- | ------------------------------------- |
+| PATH_PREFIX         | False    | Path/directory to Python project code |
+
 ## Outputs
 
 <!-- markdownlint-disable MD013 -->
