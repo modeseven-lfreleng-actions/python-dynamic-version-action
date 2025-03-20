@@ -18,7 +18,7 @@ permissions: {}
 jobs:
   ### Test the GitHub Action in this Repository ###
   tests:
-    name: "Test local GitHub Action"
+    name: "Action Testing"
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -27,19 +27,28 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       # Perform setup prior to running test(s)
-      - name: "Testing setup step"
-        shell: bash
-        run: |
-          # Testing setup step
-          echo "Testing setup step"
-          echo "Testing setup step/summary output" >> "$GITHUB_STEP_SUMMARY"
+      - name: "Checkout sample project repository"
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: "lfreleng-actions/test-python-project"
+          path: "test-python-project"
 
-      - name: "Running local action: ${{ github.repository }}"
+      - name: "Run Action: ${{ github.repository }}"
+        id: testing
         uses: ./
+        with:
+          path_prefix: "test-python-project/"
 
-      - name: "Validating local action: ${{ github.repository }}"
+      - name: "Validate Action Output: ${{ github.repository }}"
         shell: bash
         run: |
-          # Local action validation
-          echo "Validating local action: ${{ github.repository }}"
-          echo "Validation step summary output" >> "$GITHUB_STEP_SUMMARY"
+          # Validate Action Output
+          if [ "${{ steps.testing.outputs.dynamic_version }}" \
+            != "false" ]; then
+            echo "Unexpected return value for: dynamic_version ❌"
+            echo "Returned: ${{ steps.testing.outputs.dynamic_version }}"
+            echo "Expected: false"
+            exit 1
+          else
+            echo "Test passed ✅"
+          fi
