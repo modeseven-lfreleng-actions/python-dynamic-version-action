@@ -12,7 +12,7 @@ inputs:
     description: "Directory location containing project code"
     type: string
     required: false
-    default: ""
+
 outputs:
   DYNAMIC_VERSION:
     description: "Set true when dynamic versioning configured"
@@ -21,11 +21,30 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: "Setup action/environment"
+      shell: bash
+      run: |
+        # Setup action/environment
+        # Handle path_prefix input consistently and when absent
+        path_prefix="${{ inputs.PATH_PREFIX }}"
+        if [ -z "$path_prefix" ]; then
+          # Set current directory as path prefix
+          path_prefix="."
+        else
+          # Strip any trailing slash in provided path
+          path_prefix="${path_prefix%/}"
+        fi
+        # Verify is a valid directory path
+        if [ ! -d "$path_prefix" ]; then
+          echo "Error: invalid path/prefix to project directory ❌"; exit 1
+        fi
+        echo "path_prefix=$path_prefix" >> "$GITHUB_ENV"
+
     - name: "Check for required pyproject.toml file"
       # yamllint disable-line rule:line-length
       uses: lfreleng-actions/path-check-action@7f728b8ac404d3309cfa576f0ffc54217ade2faa # v0.1.1
       with:
-        path: "${{ inputs.path_prefix }}pyproject.toml"
+        path: "${{ env.path_prefix }}/pyproject.toml"
 
     - id: parse
       name: "Check for dynamic project versioning"
@@ -33,7 +52,7 @@ runs:
       run: |
         # Check for dynamic project versioning
         if (grep -q 'dynamic = \["version"\]' \
-          ${{ inputs.path_prefix }}pyproject.toml); then
+          ${{ env.path_prefix }}/pyproject.toml); then
           echo "Dynamic versioning configured ✅"
           echo "dynamic_version=true" >> "$GITHUB_ENV"
           echo "dynamic_version=true" >> "$GITHUB_OUTPUT"
