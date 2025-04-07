@@ -42,7 +42,7 @@ runs:
 
     - name: "Check for required pyproject.toml file"
       # yamllint disable-line rule:line-length
-      uses: lfreleng-actions/path-check-action@7f728b8ac404d3309cfa576f0ffc54217ade2faa # v0.1.1
+      uses: lfreleng-actions/path-check-action@ef6cb64d8851552e1290d7e535d00380ce1f5112 # v0.1.2
       with:
         path: "${{ env.path_prefix }}/pyproject.toml"
 
