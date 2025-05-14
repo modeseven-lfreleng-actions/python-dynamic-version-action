@@ -3,52 +3,56 @@
 # SPDX-FileCopyrightText: 2025 The Linux Foundation
 
 # Action test/validation workflow
-name: "Test GitHub Action 🧪"
+name: 'Test GitHub Action 🧪'
 
 # yamllint disable-line rule:truthy
 on:
   workflow_dispatch:
   push:
-    branches: ["main"]
+    branches: ['main']
   pull_request:
-    branches: ["main"]
+    branches: ['main']
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
 
 permissions: {}
 
 jobs:
   ### Test the GitHub Action in this Repository ###
   tests:
-    name: "Action Testing"
-    runs-on: ubuntu-24.04
+    name: 'Action Testing'
+    runs-on: 'ubuntu-24.04'
     permissions:
       contents: read
     steps:
-      - name: "Checkout repository"
+      - name: 'Checkout repository'
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       # Perform setup prior to running test(s)
-      - name: "Checkout sample project repository"
+      - name: 'Checkout sample project repository'
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          repository: "lfreleng-actions/test-python-project"
-          path: "test-python-project"
+          repository: 'lfreleng-actions/test-python-project'
+          path: 'test-python-project'
 
-      - name: "Run Action: ${{ github.repository }}"
+      - name: "Run action: ${{ github.repository }}"
         id: testing
         uses: ./
         with:
-          path_prefix: "test-python-project/"
+          path_prefix: 'test-python-project'
 
-      - name: "Validate Action Output: ${{ github.repository }}"
+      - name: "Validate action: ${{ github.repository }}"
         shell: bash
         run: |
           # Validate Action Output
           if [ "${{ steps.testing.outputs.dynamic_version }}" \
-            != "false" ]; then
-            echo "Unexpected return value for: dynamic_version ❌"
+            != 'false' ]; then
+            echo 'Error: unexpected return value for dynamic_version ❌'
             echo "Returned: ${{ steps.testing.outputs.dynamic_version }}"
-            echo "Expected: false"
+            echo 'Expected: false'
             exit 1
           else
-            echo "Test passed ✅"
+            echo 'Test passed ✅'
           fi
