@@ -10,7 +10,6 @@ inputs:
   # Optional
   path_prefix:
     description: 'Directory location containing project code'
-    type: string
     required: false
     default: '.'
 
