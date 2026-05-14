@@ -6,10 +6,10 @@
 A project is considered to use dynamic versioning when ANY of the
 following signals is present:
 
-* ``pyproject.toml`` declares ``dynamic = ["version"]`` under ``[project]``.
-* ``pyproject.toml`` ``[build-system].requires`` lists a known dynamic
-  versioning provider (``setuptools_scm`` / ``setuptools-scm``,
-  ``hatch-vcs``, ``pbr``).
+* ``pyproject.toml`` declares ``dynamic = ["version"]`` under ``[project]``
+  (the provider is then inferred from ``[build-system].requires`` when
+  one of ``setuptools_scm`` / ``setuptools-scm``, ``hatch-vcs``, or
+  ``pbr`` is present; otherwise ``pyproject-dynamic`` is reported).
 * ``setup.cfg`` has a ``[pbr]`` section, or a ``[metadata] version``
   field starting with ``attr:`` or ``file:``, or ``[options] setup_requires``
   contains ``pbr`` / ``setuptools_scm`` / ``versioneer``.
@@ -31,10 +31,13 @@ Outputs to ``$GITHUB_OUTPUT`` (or stdout when running stand-alone):
 from __future__ import annotations
 
 import argparse
+import ast
 import configparser
+import io
 import os
 import re
 import sys
+import tokenize
 from pathlib import Path
 
 try:  # pragma: no cover - exercised on Python >= 3.11
@@ -44,14 +47,37 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10
 
 
 _PBR_IN_SETUP_REQUIRES = re.compile(
-    r"setup_requires\s*=\s*\[[^\]]*['\"]pbr",
+    r"setup_requires\s*=\s*\[[^\]]*['\"]pbr['\"]",
     re.IGNORECASE,
 )
 _SCM_IN_SETUP_REQUIRES = re.compile(
-    r"setup_requires\s*=\s*\[[^\]]*['\"]setuptools[_-]scm",
+    r"setup_requires\s*=\s*\[[^\]]*['\"]setuptools[_-]scm['\"]",
+    re.IGNORECASE,
+)
+_VERSIONEER_IN_SETUP_REQUIRES = re.compile(
+    r"setup_requires\s*=\s*\[[^\]]*['\"]versioneer['\"]",
     re.IGNORECASE,
 )
 _PBR_KWARG = re.compile(r"\bpbr\s*=\s*True\b", re.IGNORECASE)
+
+# PEP 508 separators that terminate a distribution name.
+_REQ_NAME_RE = re.compile(r"^([A-Za-z0-9_.\-]+)")
+
+
+def _requirement_name(raw: str) -> str:
+    """Return the normalised (PEP 503) distribution name of ``raw``.
+
+    Strips ``#`` comments and whitespace, then extracts the leading
+    PEP 508 name and lowercases / underscore-to-hyphen normalises it.
+    Returns an empty string when no name can be parsed.
+    """
+    text = raw.split("#", 1)[0].strip()
+    if not text:
+        return ""
+    match = _REQ_NAME_RE.match(text)
+    if not match:
+        return ""
+    return match.group(1).lower().replace("_", "-")
 
 
 def detect_from_pyproject(path: Path) -> str:
@@ -67,7 +93,8 @@ def detect_from_pyproject(path: Path) -> str:
     project = data.get("project") or {}
     dynamic_fields = project.get("dynamic") or []
     requires = data.get("build-system", {}).get("requires", []) or []
-    joined = " ".join(str(r) for r in requires).lower()
+    requirement_names = {_requirement_name(str(r)) for r in requires}
+    requirement_names.discard("")
 
     # Robust against the (technically invalid) ``dynamic = "version"``
     # string form: only a list of strings is honoured.
@@ -75,18 +102,20 @@ def detect_from_pyproject(path: Path) -> str:
         isinstance(dynamic_fields, list) and "version" in dynamic_fields
     )
 
-    # Provider inference from build-system.requires, even when [project]
-    # declares no dynamic version explicitly (occasional Hatch / SCM
-    # layouts rely solely on the build-system marker).
-    if "setuptools_scm" in joined or "setuptools-scm" in joined:
+    # Provider inference is gated on ``[project].dynamic`` actually
+    # listing ``"version"``. A static ``version = "1.0"`` paired with,
+    # say, ``setuptools_scm`` in build-system requires (leftover from a
+    # refactor, or used for unrelated tooling) MUST report as static.
+    if not has_dynamic_version:
+        return ""
+
+    if {"setuptools-scm"} & requirement_names:
         return "setuptools-scm"
-    if "hatch-vcs" in joined:
+    if "hatch-vcs" in requirement_names:
         return "hatch-vcs"
-    if "pbr" in joined:
+    if "pbr" in requirement_names:
         return "pbr"
-    if has_dynamic_version:
-        return "pyproject-dynamic"
-    return ""
+    return "pyproject-dynamic"
 
 
 def detect_from_setup_cfg(path: Path) -> str:
@@ -113,17 +142,131 @@ def detect_from_setup_cfg(path: Path) -> str:
 
     if cfg.has_option("options", "setup_requires"):
         for line in cfg.get("options", "setup_requires").splitlines():
-            line = line.strip().lower()
-            if not line:
+            name = _requirement_name(line)
+            if not name:
                 continue
-            if "pbr" in line:
+            if name == "pbr":
                 return "pbr"
-            if "setuptools_scm" in line or "setuptools-scm" in line:
+            if name == "setuptools-scm":
                 return "setuptools-scm"
-            if "versioneer" in line:
+            if name == "versioneer":
                 return "versioneer"
 
     return ""
+
+
+def _is_setup_call(node: ast.AST) -> bool:
+    """Return True when ``node`` is a call to ``setup(...)``."""
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    if isinstance(func, ast.Name) and func.id == "setup":
+        return True
+    if isinstance(func, ast.Attribute) and func.attr == "setup":
+        return True
+    return False
+
+
+def _setup_requires_provider(value: ast.AST) -> str:
+    """Inspect a ``setup_requires=`` AST value for known providers."""
+    if not isinstance(value, (ast.List, ast.Tuple, ast.Set)):
+        return ""
+    for element in value.elts:
+        if not isinstance(element, ast.Constant):
+            continue
+        if not isinstance(element.value, str):
+            continue
+        name = _requirement_name(element.value)
+        if name == "pbr":
+            return "pbr"
+        if name == "setuptools-scm":
+            return "setuptools-scm"
+        if name == "versioneer":
+            return "versioneer"
+    return ""
+
+
+def _detect_from_setup_py_ast(tree: ast.AST) -> str:
+    """AST-based provider detection for a parsed setup.py module."""
+    setup_provider = ""
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not _is_setup_call(node):
+            continue
+        for keyword in node.keywords:
+            if keyword.arg == "pbr":
+                val = keyword.value
+                if isinstance(val, ast.Constant) and val.value is True:
+                    return "pbr"
+            elif keyword.arg == "use_scm_version":
+                # Any non-False, non-None value indicates SCM in use.
+                val = keyword.value
+                if isinstance(val, ast.Constant) and val.value in (False, None):
+                    continue
+                setup_provider = setup_provider or "setuptools-scm"
+            elif keyword.arg == "setup_requires":
+                provider = _setup_requires_provider(keyword.value)
+                if provider:
+                    setup_provider = setup_provider or provider
+            elif keyword.arg == "version":
+                # ``version=versioneer.get_version()`` clinches versioneer.
+                val = keyword.value
+                if isinstance(val, ast.Call):
+                    func = val.func
+                    if (
+                        isinstance(func, ast.Attribute)
+                        and isinstance(func.value, ast.Name)
+                        and func.value.id == "versioneer"
+                        and func.attr in {"get_version", "get_cmdclass"}
+                    ):
+                        return "versioneer"
+    if setup_provider:
+        return setup_provider
+
+    # Module-level versioneer.get_version() / get_cmdclass() calls.
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if (
+            isinstance(func, ast.Attribute)
+            and isinstance(func.value, ast.Name)
+            and func.value.id == "versioneer"
+            and func.attr in {"get_version", "get_cmdclass"}
+        ):
+            return "versioneer"
+    return ""
+
+
+def _strip_py_comments_and_strings(text: str) -> str:
+    """Remove ``#`` comments and string literals from ``text``.
+
+    Used as a fallback when ``ast.parse`` fails (e.g. Python 2 syntax
+    or syntax errors). Robust enough to avoid the obvious false
+    positives from docstrings / commented-out code.
+    """
+    out: list[str] = []
+    try:
+        tokens = tokenize.generate_tokens(io.StringIO(text).readline)
+        for tok in tokens:
+            tok_type = tok.type
+            if tok_type in (tokenize.COMMENT, tokenize.STRING):
+                continue
+            if tok_type in (
+                tokenize.NL,
+                tokenize.NEWLINE,
+                tokenize.INDENT,
+                tokenize.DEDENT,
+                tokenize.ENCODING,
+                tokenize.ENDMARKER,
+            ):
+                out.append("\n" if tok_type in (tokenize.NL, tokenize.NEWLINE) else "")
+                continue
+            out.append(tok.string)
+            out.append(" ")
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        # Last-ditch: strip line comments only.
+        return "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+    return "".join(out)
 
 
 def detect_from_setup_py(path: Path) -> str:
@@ -135,13 +278,27 @@ def detect_from_setup_py(path: Path) -> str:
     except OSError:
         return ""
 
-    if _PBR_KWARG.search(text) or _PBR_IN_SETUP_REQUIRES.search(text):
-        return "pbr"
-    if "use_scm_version" in text or _SCM_IN_SETUP_REQUIRES.search(text):
-        return "setuptools-scm"
-    if "versioneer.get_version" in text or "versioneer.get_cmdclass" in text:
-        return "versioneer"
-    return ""
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        # Fallback: strip comments / strings, then run the original
+        # regex-based heuristics. Suppresses false positives from
+        # docstrings and commented-out code without losing coverage
+        # for Python 2 era setup.py shims that ``ast`` cannot parse.
+        sanitised = _strip_py_comments_and_strings(text)
+        if _PBR_KWARG.search(sanitised) or _PBR_IN_SETUP_REQUIRES.search(sanitised):
+            return "pbr"
+        if "use_scm_version" in sanitised or _SCM_IN_SETUP_REQUIRES.search(sanitised):
+            return "setuptools-scm"
+        if (
+            "versioneer.get_version" in sanitised
+            or "versioneer.get_cmdclass" in sanitised
+            or _VERSIONEER_IN_SETUP_REQUIRES.search(sanitised)
+        ):
+            return "versioneer"
+        return ""
+
+    return _detect_from_setup_py_ast(tree)
 
 
 def emit(outputs: dict[str, str]) -> None:

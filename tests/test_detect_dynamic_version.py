@@ -330,6 +330,183 @@ def test_setup_py_versioneer(tmp_path: Path) -> None:
     assert out["dynamic_provider"] == "versioneer"
 
 
+# -- Copilot regression coverage ---------------------------------------
+
+
+def test_pyproject_static_with_scm_in_build_requires(tmp_path: Path) -> None:
+    """Static ``version = "1.0"`` with ``setuptools_scm`` in build-system
+    requires MUST report as static (regression: build-system requires
+    alone no longer imply dynamic versioning).
+    """
+    rc, out, _, _ = _run(
+        tmp_path,
+        {
+            "pyproject.toml": (
+                "[build-system]\n"
+                'requires = ["setuptools>=61", "setuptools_scm>=6.0"]\n'
+                "\n"
+                "[project]\n"
+                'name = "static-scm-leftover"\n'
+                'version = "1.0"\n'
+            ),
+        },
+    )
+    assert rc == 0
+    assert out["dynamic_version"] == "false"
+    assert out["dynamic_provider"] == ""
+
+
+def test_pyproject_static_with_pbr_and_hatch_in_build_requires(tmp_path: Path) -> None:
+    """Same regression for ``pbr`` and ``hatch-vcs`` in build-system."""
+    for requires in (
+        '["hatchling", "hatch-vcs"]',
+        '["setuptools", "pbr"]',
+    ):
+        rc, out, _, _ = _run(
+            tmp_path,
+            {
+                "pyproject.toml": (
+                    "[build-system]\n"
+                    f"requires = {requires}\n"
+                    "\n"
+                    "[project]\n"
+                    'name = "static-pkg"\n'
+                    'version = "1.0"\n'
+                ),
+            },
+        )
+        assert rc == 0
+        assert out["dynamic_version"] == "false", requires
+
+
+def test_setup_cfg_libpbr_is_not_pbr(tmp_path: Path) -> None:
+    """``setup_requires = libpbr`` must NOT match ``pbr`` (substring
+    regression: PEP 503 name comparison only).
+    """
+    rc, out, _, _ = _run(
+        tmp_path,
+        {
+            "setup.cfg": (
+                "[metadata]\n"
+                "name = libpbr-user\n"
+                "version = 1.0\n"
+                "\n"
+                "[options]\n"
+                "setup_requires =\n"
+                "    libpbr\n"
+            ),
+        },
+    )
+    assert rc == 0
+    assert out["dynamic_version"] == "false"
+
+
+def test_setup_cfg_pbr_with_version_specifier(tmp_path: Path) -> None:
+    """``setup_requires = pbr>=2`` SHOULD match ``pbr``."""
+    rc, out, _, _ = _run(
+        tmp_path,
+        {
+            "setup.cfg": (
+                "[metadata]\n"
+                "name = pbr-pinned\n"
+                "\n"
+                "[options]\n"
+                "setup_requires =\n"
+                "    pbr>=2.0\n"
+            ),
+        },
+    )
+    assert rc == 0
+    assert out["dynamic_provider"] == "pbr"
+
+
+def test_setup_cfg_comment_is_not_pbr(tmp_path: Path) -> None:
+    """A ``# pbr is not used here`` comment line must NOT match pbr."""
+    rc, out, _, _ = _run(
+        tmp_path,
+        {
+            "setup.cfg": (
+                "[metadata]\n"
+                "name = pkg\n"
+                "version = 1.0\n"
+                "\n"
+                "[options]\n"
+                "setup_requires =\n"
+                "    # pbr is not used here\n"
+                "    wheel\n"
+            ),
+        },
+    )
+    assert rc == 0
+    assert out["dynamic_version"] == "false"
+
+
+def test_setup_py_docstring_mentioning_pbr(tmp_path: Path) -> None:
+    """A docstring discussing ``pbr=True`` must NOT trip the detector."""
+    rc, out, _, _ = _run(
+        tmp_path,
+        {
+            "setup.py": (
+                '"""This shim used pbr=True historically; '
+                "use_scm_version was also tried. versioneer.get_version() "
+                'was considered."""\n'
+                "# pbr=True is deprecated\n"
+                "from setuptools import setup\n"
+                "setup(name='p', version='1.0')\n"
+            ),
+        },
+    )
+    assert rc == 0
+    assert out["dynamic_version"] == "false", out
+
+
+def test_setup_py_libpbr_in_setup_requires(tmp_path: Path) -> None:
+    """``setup_requires=['libpbr']`` must NOT report pbr."""
+    rc, out, _, _ = _run(
+        tmp_path,
+        {
+            "setup.py": (
+                "from setuptools import setup\n"
+                "setup(name='p', version='1.0', setup_requires=['libpbr'])\n"
+            ),
+        },
+    )
+    assert rc == 0
+    assert out["dynamic_version"] == "false"
+
+
+def test_setup_py_malformed_syntax_falls_back(tmp_path: Path) -> None:
+    """A setup.py with malformed syntax must not crash; the fallback
+    tokenizer still rejects mentions inside comments / strings.
+    """
+    rc, out, _, _ = _run(
+        tmp_path,
+        {
+            "setup.py": (
+                "# stray syntax error follows\n"
+                "from setuptools import setup\n"
+                "setup(name='p' version='1.0')  # missing comma; "
+                "# pbr=True only in comment\n"
+            ),
+        },
+    )
+    assert rc == 0
+    # Must not crash and must not falsely report pbr from the comment.
+    assert out["dynamic_version"] == "false"
+
+
+def test_setup_py_pbr_via_attribute_call(tmp_path: Path) -> None:
+    """``setuptools.setup(pbr=True)`` (attribute form) is recognised."""
+    rc, out, _, _ = _run(
+        tmp_path,
+        {
+            "setup.py": ("import setuptools\nsetuptools.setup(name='p', pbr=True)\n"),
+        },
+    )
+    assert rc == 0
+    assert out["dynamic_provider"] == "pbr"
+
+
 # -- multi-file precedence ---------------------------------------------
 
 
