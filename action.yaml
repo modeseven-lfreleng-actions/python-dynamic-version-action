@@ -4,7 +4,10 @@
 
 # python-dynamic-version-action
 name: '🐍 Python Project Dynamic Versioning'
-description: 'Checks dynamic versioning setup in the pyproject.toml file'
+description: >-
+  Detects whether a Python project uses dynamic versioning. Recognises
+  pyproject.toml dynamic=["version"], setup.cfg attr:/file: indirection,
+  PBR, setuptools-scm, versioneer and hatch-vcs.
 
 inputs:
   # Optional
@@ -15,8 +18,19 @@ inputs:
 
 outputs:
   dynamic_version:
-    description: 'Set true when dynamic versioning configured'
-    value: "${{ steps.parse.outputs.dynamic_version }}"
+    description: '"true" when dynamic versioning is configured.'
+    value: "${{ steps.detect.outputs.dynamic_version }}"
+  dynamic_provider:
+    description: >-
+      Identifier of the dynamic versioning provider when dynamic_version
+      is true: pbr | setuptools-scm | versioneer | setuptools-dynamic |
+      hatch-vcs | pyproject-dynamic. Empty when static.
+    value: "${{ steps.detect.outputs.dynamic_provider }}"
+  source:
+    description: >-
+      Path to the file that supplied the dynamic-versioning signal.
+      Empty when no signal was found.
+    value: "${{ steps.detect.outputs.source }}"
 
 runs:
   using: 'composite'
@@ -26,31 +40,16 @@ runs:
       run: |
         # Verify action/environment
         if [ ! -d "${{ inputs.path_prefix }}" ]; then
-          echo "Error: invalid path/prefix to project directory ❌"; exit 1
+          echo "Error: invalid path/prefix to project directory ❌"
+          exit 1
         fi
 
-    - name: 'Check for required pyproject.toml file'
-      # yamllint disable-line rule:line-length
-      uses: lfreleng-actions/path-check-action@9606e61c870025bc956e63156d1d55c5df54426c # v0.2.0
-      with:
-        path: "${{ inputs.path_prefix }}/pyproject.toml"
-
-    - id: parse
-      name: 'Check for dynamic project versioning'
+    - name: 'Detect dynamic versioning'
+      id: detect
       shell: bash
-      # yamllint disable rule:line-length
+      env:
+        INPUT_PATH_PREFIX: ${{ inputs.path_prefix }}
       run: |
-        # Check for dynamic project versioning
-
-        # See: https://regex101.com/r/XneQ1u/1
-        if awk '/^\[project\]/ {in_project=1; next} /^\[/ {in_project=0} in_project' \
-          "${{ inputs.path_prefix }}/pyproject.toml" \
-          | grep -Eq "^[[:space:]]*dynamic[[:space:]]*=[[:space:]]*\[[^]]*['\"]version['\"][^]]*\]"; then
-          echo 'Dynamic versioning configured ✅'
-          echo "dynamic_version=true" >> "$GITHUB_ENV"
-          echo "dynamic_version=true" >> "$GITHUB_OUTPUT"
-        else
-          echo 'Dynamic versioning is NOT configured 💬'
-          echo "dynamic_version=false" >> "$GITHUB_ENV"
-          echo "dynamic_version=false" >> "$GITHUB_OUTPUT"
-        fi
+        # Detection is delegated to the bundled Python helper which
+        # recognises pyproject.toml, setup.cfg, and setup.py signals.
+        python3 "$GITHUB_ACTION_PATH/scripts/detect_dynamic_version.py"
