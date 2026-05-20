@@ -20,19 +20,50 @@ concurrency:
 permissions: {}
 
 jobs:
-  ### Test the GitHub Action in this Repository ###
-  tests:
-    name: 'Action Testing'
+  # Fixture-based unit/integration tests covering every supported
+  # project layout (modern, legacy, dynamic provider variant).
+  pytest:
+    name: 'Pytest fixture matrix'
+    runs-on: 'ubuntu-24.04'
+    permissions:
+      contents: read
+    timeout-minutes: 5
+    steps:
+      - name: 'Checkout repository'
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: 'Setup Python'
+        # yamllint disable-line rule:line-length
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.11'
+
+      - name: 'Install pytest'
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest
+
+      - name: 'Run detector test suite'
+        shell: bash
+        run: |
+          python -m pytest tests/test_detect_dynamic_version.py -v
+
+  # End-to-end smoke test against the real sample project.
+  smoke:
+    name: 'End-to-end smoke test'
     runs-on: 'ubuntu-24.04'
     permissions:
       contents: read
     timeout-minutes: 2
     steps:
       - name: 'Checkout repository'
+        # yamllint disable-line rule:line-length
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      # Perform setup prior to running test(s)
       - name: 'Checkout sample project repository'
+        # yamllint disable-line rule:line-length
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: 'lfreleng-actions/test-python-project'
@@ -47,248 +78,20 @@ jobs:
       - name: "Validate action: ${{ github.repository }}"
         shell: bash
         run: |
-          # Validate Action Output
-          if [ "${{ steps.testing.outputs.dynamic_version }}" \
-            != 'true' ]; then
-            echo 'Error: unexpected return value for dynamic_version ❌'
-            echo "Returned: ${{ steps.testing.outputs.dynamic_version }}"
-            echo 'Expected: true'
+          dynamic='${{ steps.testing.outputs.dynamic_version }}'
+          provider='${{ steps.testing.outputs.dynamic_provider }}'
+          source='${{ steps.testing.outputs.source }}'
+          if [ "$dynamic" != 'true' ]; then
+            echo 'Error: expected dynamic_version=true ❌'
+            echo "Returned: $dynamic"
             exit 1
-          else
-            echo 'Test passed ✅'
           fi
-
-      # Additional single-line pyproject.toml tests
-
-      # Too many long lines in the tests below
-      # yamllint disable rule:line-length
-
-      - name: "Prepare case 1: double quotes, standard spacing"
-        shell: bash
-        run: |
-          echo -e '[project]\ndynamic = ["version"]' > test-python-project/pyproject.toml
-
-      - name: "Run action: case 1"
-        id: case1
-        uses: ./
-        with:
-          path_prefix: 'test-python-project'
-
-      - name: "Validate case 1 (expect true)"
-        shell: bash
-        run: |
-          if [ "${{ steps.case1.outputs.dynamic_version }}" != 'true' ]; then
-            echo 'Error: case 1 failed ❌'
-            echo "Returned: ${{ steps.case1.outputs.dynamic_version }}"
-            echo 'Expected: true'
+          if [ -z "$provider" ]; then
+            echo 'Error: dynamic_provider must not be empty ❌'
             exit 1
-          else
-            echo 'Case 1 passed ✅'
           fi
-
-      - name: "Prepare case 2: single quotes, no spaces"
-        shell: bash
-        run: |
-          echo -e "[project]\ndynamic=['version']" > test-python-project/pyproject.toml
-
-      - name: "Run action: case 2"
-        id: case2
-        uses: ./
-        with:
-          path_prefix: 'test-python-project'
-
-      - name: "Validate case 2 (expect true)"
-        shell: bash
-        run: |
-          if [ "${{ steps.case2.outputs.dynamic_version }}" != 'true' ]; then
-            echo 'Error: case 2 failed ❌'
-            echo "Returned: ${{ steps.case2.outputs.dynamic_version }}"
-            echo 'Expected: true'
+          if [ -z "$source" ]; then
+            echo 'Error: source must not be empty ❌'
             exit 1
-          else
-            echo 'Case 2 passed ✅'
           fi
-
-      - name: "Prepare case 3: mixed items including version"
-        shell: bash
-        run: |
-          echo -e "[project]\ndynamic = [ 'name', 'version' ]" > test-python-project/pyproject.toml
-
-      - name: "Run action: case 3"
-        id: case3
-        uses: ./
-        with:
-          path_prefix: 'test-python-project'
-
-      - name: "Validate case 3 (expect true)"
-        shell: bash
-        run: |
-          if [ "${{ steps.case3.outputs.dynamic_version }}" != 'true' ]; then
-            echo 'Error: case 3 failed ❌'
-            echo "Returned: ${{ steps.case3.outputs.dynamic_version }}"
-            echo 'Expected: true'
-            exit 1
-          else
-            echo 'Case 3 passed ✅'
-          fi
-
-      - name: "Prepare case 4: trailing comma and compact list"
-        shell: bash
-        run: |
-          echo -e '[project]\ndynamic=["version","name",]' > test-python-project/pyproject.toml
-
-      - name: "Run action: case 4"
-        id: case4
-        uses: ./
-        with:
-          path_prefix: 'test-python-project'
-
-      - name: "Validate case 4 (expect true)"
-        shell: bash
-        run: |
-          if [ "${{ steps.case4.outputs.dynamic_version }}" != 'true' ]; then
-            echo 'Error: case 4 failed ❌'
-            echo "Returned: ${{ steps.case4.outputs.dynamic_version }}"
-            echo 'Expected: true'
-            exit 1
-          else
-            echo 'Case 4 passed ✅'
-          fi
-
-      - name: "Prepare case 5: extra whitespace around tokens"
-        shell: bash
-        run: |
-          echo -e '[project]\n   dynamic    =    ["version"]' > test-python-project/pyproject.toml
-
-      - name: "Run action: case 5"
-        id: case5
-        uses: ./
-        with:
-          path_prefix: 'test-python-project'
-
-      - name: "Validate case 5 (expect true)"
-        shell: bash
-        run: |
-          if [ "${{ steps.case5.outputs.dynamic_version }}" != 'true' ]; then
-            echo 'Error: case 5 failed ❌'
-            echo "Returned: ${{ steps.case5.outputs.dynamic_version }}"
-            echo 'Expected: true'
-            exit 1
-          else
-            echo 'Case 5 passed ✅'
-          fi
-
-      - name: "Prepare case 6: no version present (negative)"
-        shell: bash
-        run: |
-          echo -e '[project]\ndynamic = ["name"]' > test-python-project/pyproject.toml
-
-      - name: "Run action: case 6"
-        id: case6
-        uses: ./
-        with:
-          path_prefix: 'test-python-project'
-
-      - name: "Validate case 6 (expect false)"
-        shell: bash
-        run: |
-          if [ "${{ steps.case6.outputs.dynamic_version }}" != 'false' ]; then
-            echo 'Error: case 6 failed ❌'
-            echo "Returned: ${{ steps.case6.outputs.dynamic_version }}"
-            echo 'Expected: false'
-            exit 1
-          else
-            echo 'Case 6 passed ✅'
-          fi
-
-      - name: "Prepare case 7: commented out (negative)"
-        shell: bash
-        run: |
-          echo -e '[project]\n# dynamic = ["version"]' > test-python-project/pyproject.toml
-
-      - name: "Run action: case 7"
-        id: case7
-        uses: ./
-        with:
-          path_prefix: 'test-python-project'
-
-      - name: "Validate case 7 (expect false)"
-        shell: bash
-        run: |
-          if [ "${{ steps.case7.outputs.dynamic_version }}" != 'false' ]; then
-            echo 'Error: case 7 failed ❌'
-            echo "Returned: ${{ steps.case7.outputs.dynamic_version }}"
-            echo 'Expected: false'
-            exit 1
-          else
-            echo 'Case 7 passed ✅'
-          fi
-
-      - name: "Prepare case 8: multiple items with single quotes"
-        shell: bash
-        run: |
-          echo -e "[project]\ndynamic = ['description','version','readme']" > test-python-project/pyproject.toml
-
-      - name: "Run action: case 8"
-        id: case8
-        uses: ./
-        with:
-          path_prefix: 'test-python-project'
-
-      - name: "Validate case 8 (expect true)"
-        shell: bash
-        run: |
-          if [ "${{ steps.case8.outputs.dynamic_version }}" != 'true' ]; then
-            echo 'Error: case 8 failed ❌'
-            echo "Returned: ${{ steps.case8.outputs.dynamic_version }}"
-            echo 'Expected: true'
-            exit 1
-          else
-            echo 'Case 8 passed ✅'
-          fi
-
-      - name: "Prepare case 9: uppercase VERSION (negative)"
-        shell: bash
-        run: |
-          echo -e '[project]\ndynamic = ["VERSION"]' > test-python-project/pyproject.toml
-
-      - name: "Run action: case 9"
-        id: case9
-        uses: ./
-        with:
-          path_prefix: 'test-python-project'
-
-      - name: "Validate case 9 (expect false)"
-        shell: bash
-        run: |
-          if [ "${{ steps.case9.outputs.dynamic_version }}" != 'false' ]; then
-            echo 'Error: case 9 failed ❌'
-            echo "Returned: ${{ steps.case9.outputs.dynamic_version }}"
-            echo 'Expected: false'
-            exit 1
-          else
-            echo 'Case 9 passed ✅'
-          fi
-
-      - name: "Prepare case 10: dynamic wrong type (string instead of list) (negative)"
-        shell: bash
-        run: |
-          echo -e '[project]\ndynamic = "version"' > test-python-project/pyproject.toml
-
-      - name: "Run action: case 10"
-        id: case10
-        uses: ./
-        with:
-          path_prefix: 'test-python-project'
-
-      - name: "Validate case 10 (expect false)"
-        shell: bash
-        run: |
-          if [ "${{ steps.case10.outputs.dynamic_version }}" != 'false' ]; then
-            echo 'Error: case 10 failed ❌'
-            echo "Returned: ${{ steps.case10.outputs.dynamic_version }}"
-            echo 'Expected: false'
-            exit 1
-          else
-            echo 'Case 10 passed ✅'
-          fi
+          echo "Detected provider=$provider source=$source ✅"
