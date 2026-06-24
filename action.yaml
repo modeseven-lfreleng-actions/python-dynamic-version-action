@@ -37,9 +37,11 @@ runs:
   steps:
     - name: 'Verify action/environment'
       shell: bash
+      env:
+        INPUT_PATH_PREFIX: ${{ inputs.path_prefix }}
       run: |
         # Verify action/environment
-        if [ ! -d "${{ inputs.path_prefix }}" ]; then
+        if [ ! -d "$INPUT_PATH_PREFIX" ]; then
           echo "Error: invalid path/prefix to project directory ❌"
           exit 1
         fi
