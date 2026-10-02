@@ -3,6 +3,12 @@
 # SPDX-FileCopyrightText: 2025 The Linux Foundation
 
 ci:
+  # basedpyright's hook environment measures 284 MiB (bundled Node.js
+  # 200 MiB, basedpyright 73 MiB, plus pytest and tomli), over
+  # pre-commit.ci's 250 MiB per-hook limit, so it cannot run there.
+  # No workflow in this repository runs it either: it is enforced
+  # developer-side only, by the local hook and the editor.
+  skip: [basedpyright]
   autofix_prs: false
   autofix_commit_msg: |
     Chore: pre-commit autofixes
@@ -54,10 +60,8 @@ repos:
     rev: a56c0b927e6465d37cae3e97d35d4d18ab2b96cd  # frozen: v0.16.9
     hooks:
       - id: ruff
-        files: ^(scripts|tests|custom_components)/.+\.py$
         args: [--fix, --exit-non-zero-on-fix]
       - id: ruff-format
-        files: ^(scripts|tests|custom_components)/.+\.py$
 
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: 7ff8d35ae36a7d2b968f2f90b4c723e292e594ee  # frozen: v2.3.1
@@ -102,6 +106,38 @@ repos:
     rev: 57b21406f092110c18776e39b0bda50d37c945c8  # frozen: v2.4.3
     hooks:
       - id: codespell
+
+  # Requires a mirror, primary repo lacks .pre-commit-hooks.yaml
+  #
+  # Configured in pyrightconfig.json rather than [tool.basedpyright],
+  # deliberately. A root pyproject.toml, even a tool-only one, makes
+  # this repository look like an installable Python project: tox.ini
+  # (isolated_build) switches from skipping packaging to building an
+  # sdist of the repository, and 'pip install .' (used by
+  # .readthedocs.yml) stops rejecting the directory as not installable
+  # and builds a package instead. The action itself only reads
+  # <path_prefix>/pyproject.toml in the caller's project, so it is
+  # unaffected either way. pyrightconfig.json is read by (based)pyright
+  # alone; it takes no comments, hence this note lives here.
+  - repo: https://github.com/DetachHead/basedpyright-prek-mirror
+    rev: 706e6acebe9e88c2c28d1527d3085a14b11794c4  # frozen: 1.40.1
+    hooks:
+      - id: basedpyright
+        # Fail on warnings as well as errors, so anything an editor's
+        # language server shows also blocks the commit.
+        #
+        # Explicit directories with filename passing disabled: with file
+        # arguments present, 'include' is not the analysis scope, so a
+        # change to the script could break an unstaged test unnoticed.
+        # Keep this list identical to 'include' in pyrightconfig.json.
+        pass_filenames: false
+        # Run even when no Python file is staged (deletions, config-only).
+        always_run: true
+        args: [--warnings, scripts, tests]
+        # Third-party imports in the scanned code, installed so they
+        # resolve genuinely: pytest (tests) and tomli (the script's
+        # Python 3.10 fallback for tomllib). Both ship inline types.
+        additional_dependencies: ["pytest", "tomli"]
 
   - repo: https://github.com/python-jsonschema/check-jsonschema
     rev: 4f85d46a92dc17713078e5de73f8a13190edf6fc  # frozen: 0.38.2

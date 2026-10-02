@@ -338,6 +338,9 @@ def emit(outputs: dict[str, str]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Narrows str | None: the module docstring above is always present,
+    # unless docstrings are stripped by python -OO.
+    assert __doc__ is not None
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "--path-prefix",
